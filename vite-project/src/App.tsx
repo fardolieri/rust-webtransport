@@ -1,37 +1,54 @@
 import { Link, MetaProvider } from "@solidjs/meta";
-import { createSignal } from 'solid-js';
 import './App.css';
-import solidLogo from './assets/solid.svg';
 import viteLogo from './assets/vite.svg';
+// @ts-ignore
+import { connect, sendData } from './client';
 
 function App() {
-  const [count, setCount] = createSignal(0)
+  const WEBTRANSPORT_PORT = 0 /* REPLACED_BY_RUST_SERVER */;
 
   return (
     <>
       <MetaProvider>
         <Link rel="icon" href={viteLogo} />
       </MetaProvider>
+
+      <h1>WTransport Example</h1>
+
       <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} class="logo" alt="Vite logo" />
-        </a>
-        <a href="https://solidjs.com" target="_blank">
-          <img src={solidLogo} class="logo solid" alt="Solid logo" />
-        </a>
-      </div>
-      <h1>Vite + Solid</h1>
-      <div class="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count()}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p class="read-the-docs">
-        Click on the Vite and Solid logos to learn more
-      </p>
+        <h2>Establish WebTransport connection</h2>
+        <div class="input-line">
+          <label for="url">URL:</label>
+          <input type="text" name="url" id="url" value={`https://localhost:${WEBTRANSPORT_PORT}/`} />
+            <input type="button" id="connect" value="Connect" onclick={connect} />
+            </div>
+        </div>
+
+        <div>
+          <h2>Send data over WebTransport</h2>
+          <form name="sending">
+            <textarea name="data" id="data"></textarea>
+            <div>
+              <input type="radio" name="sendtype" value="datagram" id="datagram" checked />
+                <label for="datagram">Send a datagram</label>
+            </div>
+            <div>
+              <input type="radio" name="sendtype" value="unidi" id="unidi-stream" />
+                <label for="unidi-stream">Open a unidirectional stream</label>
+            </div>
+            <div>
+              <input type="radio" name="sendtype" value="bidi" id="bidi-stream" />
+                <label for="bidi-stream">Open a bidirectional stream</label>
+            </div>
+            <input type="button" id="send" name="send" value="Send data" disabled onclick={sendData} />
+          </form>
+        </div>
+
+        <div>
+          <h2>Event log</h2>
+          <ul id="event-log">
+          </ul>
+        </div>
     </>
   )
 }
