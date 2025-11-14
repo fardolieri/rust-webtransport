@@ -5,8 +5,6 @@ import viteLogo from './assets/vite.svg';
 import { connect, sendData } from './client';
 
 function App() {
-  const WEBTRANSPORT_PORT = 0 /* REPLACED_BY_RUST_SERVER */;
-
   return (
     <>
       <MetaProvider>
@@ -19,7 +17,7 @@ function App() {
         <h2>Establish WebTransport connection</h2>
         <div class="input-line">
           <label for="url">URL:</label>
-          <input type="text" name="url" id="url" value={`https://localhost:${WEBTRANSPORT_PORT}/`} />
+          <input type="text" name="url" id="url" value={`https://localhost:${window.SSR_VALUES.WEBTRANSPORT_PORT}/`} />
             <input type="button" id="connect" value="Connect" onclick={connect} />
             </div>
         </div>

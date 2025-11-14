@@ -1,15 +1,13 @@
 // Adds an entry to the event log on the page, optionally applying a specified
 // CSS class.
 
-const HASH = new Uint8Array(/* REPLACED_BY_RUST_SERVER */);
-
 let currentTransport, streamNumber, currentTransportDatagramWriter;
 
 // "Connect" button handler.
 export async function connect() {
   const url = document.getElementById('url').value;
   try {
-    var transport = new WebTransport(url, { serverCertificateHashes: [ { algorithm: "sha-256", value: HASH.buffer } ] } );
+    var transport = new WebTransport(url, { serverCertificateHashes: [ { algorithm: "sha-256", value: window.SSR_VALUES.HASH.buffer } ] } );
     addToEventLog('Initiating connection...');
   } catch (e) {
     addToEventLog('Failed to create connection object. ' + e, 'error');

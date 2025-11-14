@@ -222,13 +222,9 @@ mod http {
                 let html_content = html_content.clone();
                 let cert_digest = cert_digest.clone();
                 async move {
-                    let mut html = html_content
-                        .replace("https://localhost:0/", &format!("https://localhost:{}/", webtransport_port));
-                    
-                    // Replace the certificate digest in the Uint8Array
-                    // The HTML has: Ke=new Uint8Array
-                    // We need to replace it with: Ke=new Uint8Array([...])
-                    html = html.replace("Ke=new Uint8Array", &format!("Ke=new Uint8Array({})", cert_digest));
+                    let html = html_content
+                        .replace("window.SSR_VALUES.HASH=null", &format!("window.SSR_VALUES.HASH=new Uint8Array({})", cert_digest))
+                        .replace("window.SSR_VALUES.WEBTRANSPORT_PORT=null", &format!("window.SSR_VALUES.WEBTRANSPORT_PORT={}", webtransport_port));
                     
                     Html(html)
                 }
