@@ -1,13 +1,17 @@
-import { createSignal } from 'solid-js'
-import solidLogo from './assets/solid.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { Link, MetaProvider } from "@solidjs/meta";
+import { createSignal } from 'solid-js';
+import './App.css';
+import solidLogo from './assets/solid.svg';
+import viteLogo from './assets/vite.svg';
 
 function App() {
   const [count, setCount] = createSignal(0)
 
   return (
     <>
+      <MetaProvider>
+        <Link rel="icon" href={viteLogo} />
+      </MetaProvider>
       <div>
         <a href="https://vite.dev" target="_blank">
           <img src={viteLogo} class="logo" alt="Vite logo" />
