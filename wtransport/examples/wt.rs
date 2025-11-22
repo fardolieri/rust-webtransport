@@ -13,7 +13,7 @@ const WEBTRANSPORT_PORT: u16 = 5000;
 async fn main() -> Result<()> {
     utils::init_logging();
 
-    let identity = Identity::self_signed(["localhost", "127.0.0.1", "::1"]).unwrap();
+    let identity = Identity::load_pemfiles("localhost.crt", "localhost.key").await?;
     let cert_digest = identity.certificate_chain().as_slice()[0].hash();
     let cert_digest_hash = cert_digest.fmt(Sha256DigestFmt::BytesArray);
     println!("cert_digest_hash: {cert_digest_hash}");
