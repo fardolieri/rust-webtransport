@@ -169,16 +169,21 @@ mod http {
 
         pub async fn new(cert_digest: &Sha256Digest, webtransport_port: u16) -> Result<Self> {
             // Load HTML file once at startup
-            let html_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .join("vite-project")
-                .join("dist")
-                .join("index.html");
+            // Try multiple fallback paths in order
+            let html_paths: Vec<std::path::PathBuf> = vec![
+                // First try the directory next to the executable
+                std::env::current_exe()
+                    .context("Failed to get executable path")?
+                    .parent()
+                    .context("Executable has no parent directory")?
+                    .join("index.html"),
+                // Fallback to current working directory
+                std::env::current_dir()
+                    .context("Failed to get current working directory")?
+                    .join("index.html"),
+            ];
             
-            let html_content = tokio::fs::read_to_string(&html_path)
-                .await
-                .with_context(|| format!("Failed to read HTML file from {:?}", html_path))?;
+            let html_content = Self::try_read_html(&html_paths).await?;
 
             let router = Self::build_router(cert_digest, webtransport_port, &html_content);
 
@@ -196,6 +201,23 @@ mod http {
                 serve: serve(listener, router),
                 local_port,
             })
+        }
+
+        async fn try_read_html(paths: &[std::path::PathBuf]) -> Result<String> {
+            for path in paths {
+                if let Ok(content) = tokio::fs::read_to_string(path).await {
+                    return Ok(content);
+                }
+            }
+            
+            let paths_str: Vec<String> = paths.iter()
+                .map(|p| format!("{:?}", p))
+                .collect();
+            
+            anyhow::bail!(
+                "Failed to read HTML file from any of the following paths: {}",
+                paths_str.join(", ")
+            )
         }
 
         pub fn local_port(&self) -> u16 {
