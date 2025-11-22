@@ -1,4 +1,12 @@
 use anyhow::Result;
+use notify::event::ModifyKind;
+use notify::Event;
+use notify::EventKind;
+use notify::RecursiveMode;
+use notify::Watcher;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 use tracing::error;
 use tracing::info;
 use tracing::info_span;
@@ -18,7 +26,66 @@ async fn main() -> Result<()> {
     let cert_digest_hash = cert_digest.fmt(Sha256DigestFmt::BytesArray);
     println!("cert_digest_hash: {cert_digest_hash}");
 
-    let webtransport_server = WebTransportServer::new(identity)?;
+    let webtransport_server = Arc::new(WebTransportServer::new(identity)?);
+
+    let server_clone = webtransport_server.clone();
+    tokio::spawn(async move {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut watcher = notify::recommended_watcher(move |res: Result<Event, _>| {
+            if let Ok(event) = res {
+                let _ = tx.send(event);
+            }
+        })
+        .expect("Failed to create watcher");
+
+        watcher
+            .watch(Path::new("."), RecursiveMode::NonRecursive)
+            .expect("Failed to watch directory");
+
+        while let Some(event) = rx.recv().await {
+            // Filter events: we only care about file modifications (content) or creation
+            let is_relevant_kind = match event.kind {
+                EventKind::Create(_) => true,
+                EventKind::Modify(ModifyKind::Data(_)) => true,
+                // Some editors might use rename/move for atomic writes
+                EventKind::Modify(ModifyKind::Name(_)) => true, 
+                _ => false,
+            };
+
+            if !is_relevant_kind {
+                continue;
+            }
+
+            let should_reload = event.paths.iter().any(|path| {
+                path.file_name().map_or(false, |name| {
+                    name == "localhost.crt" || name == "localhost.key"
+                })
+            });
+
+            if should_reload {
+                // Simple debounce: wait a bit to ensure file writing is complete
+                // and to coalesce multiple events.
+                tokio::time::sleep(Duration::from_secs(2)).await;
+
+                // Drain any other events that happened during the sleep
+                while rx.try_recv().is_ok() {}
+
+                info!("Certificate files changed, reloading...");
+
+                match Identity::load_pemfiles("localhost.crt", "localhost.key").await {
+                    Ok(identity) => {
+                        if let Err(e) = server_clone.reload_certificate(identity) {
+                            error!("Failed to reload certificate: {:?}", e);
+                        } else {
+                            info!("Certificate reloaded successfully!");
+                        }
+                    }
+                    Err(e) => error!("Failed to load new certificate: {:?}", e),
+                }
+            }
+        }
+    });
 
     tokio::select! {
         result = webtransport_server.serve() => {
@@ -31,7 +98,6 @@ async fn main() -> Result<()> {
 
 mod webtransport {
     use super::*;
-    use std::time::Duration;
     use wtransport::endpoint::endpoint_side::Server;
     use wtransport::endpoint::IncomingSession;
     use wtransport::Endpoint;
@@ -58,7 +124,23 @@ mod webtransport {
             self.endpoint.local_addr().unwrap().port()
         }
 
-        pub async fn serve(self) -> Result<()> {
+        pub fn reload_certificate(&self, identity: Identity) -> Result<()> {
+            let cert_digest = identity.certificate_chain().as_slice()[0].hash();
+            let cert_digest_hash = cert_digest.fmt(Sha256DigestFmt::BytesArray);
+            println!("cert_digest_hash: {cert_digest_hash}");
+
+            let config = ServerConfig::builder()
+                .with_bind_default(WEBTRANSPORT_PORT)
+                .with_identity(identity)
+                .keep_alive_interval(Some(Duration::from_secs(3)))
+                .build();
+
+            self.endpoint.reload_config(config, false)?;
+
+            Ok(())
+        }
+
+        pub async fn serve(&self) -> Result<()> {
             info!("Server running on port {}", self.local_port());
 
             for id in 0.. {

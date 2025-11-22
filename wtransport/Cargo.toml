@@ -51,6 +51,7 @@ x509-parser = "0.17.0"
 anyhow = "1.0.71"
 axum = "0.7.1"
 hyper = "1.0.1"
+notify = "8.2.0"
 tokio = { version = "1.28.1", default-features = false, features = ["rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 
