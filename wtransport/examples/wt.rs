@@ -15,20 +15,73 @@ use webtransport::WebTransportServer;
 use wtransport::tls::Sha256DigestFmt;
 use wtransport::Identity;
 
-const WEBTRANSPORT_PORT: u16 = 5000;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     utils::init_logging();
 
-    let identity = Identity::load_pemfiles("localhost.crt", "localhost.key").await?;
+    let mut port = 4433;
+    let mut cert_path = None;
+    let mut key_path = None;
+
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        let (key, value) = match arg.split_once('=') {
+            Some((k, v)) => (k, Some(v.to_string())),
+            None => (arg.as_str(), None),
+        };
+
+        match key {
+            "--port" => {
+                if let Some(v) = value.or_else(|| args.next()) {
+                    port = v.parse().unwrap_or_else(|_| {
+                        eprintln!("Error: Invalid port number '{}'", v);
+                        std::process::exit(1);
+                    });
+                }
+            }
+            "--cert" => {
+                if let Some(v) = value.or_else(|| args.next()) {
+                    cert_path = Some(std::path::PathBuf::from(v));
+                }
+            }
+            "--key" => {
+                if let Some(v) = value.or_else(|| args.next()) {
+                    key_path = Some(std::path::PathBuf::from(v));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let cert_path = cert_path
+        .or_else(|| find_file_with_extension("crt"))
+        .unwrap_or_else(|| {
+            eprintln!("Error: No .crt file found or multiple files found in CWD");
+            std::process::exit(1);
+        });
+
+    let key_path = key_path
+        .or_else(|| find_file_with_extension("key"))
+        .unwrap_or_else(|| {
+            eprintln!("Error: No .key file found or multiple files found in CWD");
+            std::process::exit(1);
+        });
+
+    let identity = Identity::load_pemfiles(&cert_path, &key_path).await?;
     let cert_digest = identity.certificate_chain().as_slice()[0].hash();
     let cert_digest_hash = cert_digest.fmt(Sha256DigestFmt::BytesArray);
-    println!("cert_digest_hash: {cert_digest_hash}");
 
-    let webtransport_server = Arc::new(WebTransportServer::new(identity)?);
+    info!("Using port: {}", port);
+    info!("Using certificate file: {:?}", cert_path);
+    info!("Using key file: {:?}", key_path);
+    info!("Certificate digest: {cert_digest_hash}");
+
+    let webtransport_server = Arc::new(WebTransportServer::new(identity, port)?);
 
     let server_clone = webtransport_server.clone();
+    let cert_path_clone = cert_path.clone();
+    let key_path_clone = key_path.clone();
+
     tokio::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -49,7 +102,7 @@ async fn main() -> Result<()> {
                 EventKind::Create(_) => true,
                 EventKind::Modify(ModifyKind::Data(_)) => true,
                 // Some editors might use rename/move for atomic writes
-                EventKind::Modify(ModifyKind::Name(_)) => true, 
+                EventKind::Modify(ModifyKind::Name(_)) => true,
                 _ => false,
             };
 
@@ -59,7 +112,8 @@ async fn main() -> Result<()> {
 
             let should_reload = event.paths.iter().any(|path| {
                 path.file_name().map_or(false, |name| {
-                    name == "localhost.crt" || name == "localhost.key"
+                    name == cert_path_clone.file_name().unwrap()
+                        || name == key_path_clone.file_name().unwrap()
                 })
             });
 
@@ -73,7 +127,7 @@ async fn main() -> Result<()> {
 
                 info!("Certificate files changed, reloading...");
 
-                match Identity::load_pemfiles("localhost.crt", "localhost.key").await {
+                match Identity::load_pemfiles(&cert_path_clone, &key_path_clone).await {
                     Ok(identity) => {
                         if let Err(e) = server_clone.reload_certificate(identity) {
                             error!("Failed to reload certificate: {:?}", e);
@@ -105,19 +159,20 @@ mod webtransport {
 
     pub struct WebTransportServer {
         endpoint: Endpoint<Server>,
+        port: u16,
     }
 
     impl WebTransportServer {
-        pub fn new(identity: Identity) -> Result<Self> {
+        pub fn new(identity: Identity, port: u16) -> Result<Self> {
             let config = ServerConfig::builder()
-                .with_bind_default(WEBTRANSPORT_PORT)
+                .with_bind_default(port)
                 .with_identity(identity)
                 .keep_alive_interval(Some(Duration::from_secs(3)))
                 .build();
 
             let endpoint = Endpoint::server(config)?;
 
-            Ok(Self { endpoint })
+            Ok(Self { endpoint, port })
         }
 
         pub fn local_port(&self) -> u16 {
@@ -130,7 +185,7 @@ mod webtransport {
             println!("cert_digest_hash: {cert_digest_hash}");
 
             let config = ServerConfig::builder()
-                .with_bind_default(WEBTRANSPORT_PORT)
+                .with_bind_default(self.port)
                 .with_identity(identity)
                 .keep_alive_interval(Some(Duration::from_secs(3)))
                 .build();
@@ -236,5 +291,26 @@ mod utils {
             .with_level(true)
             .with_env_filter(env_filter)
             .init();
+    }
+}
+
+fn find_file_with_extension(extension: &str) -> Option<std::path::PathBuf> {
+    let files: Vec<_> = std::fs::read_dir(".")
+        .ok()?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension()?.to_str()? == extension {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if files.len() == 1 {
+        Some(files[0].clone())
+    } else {
+        None
     }
 }
